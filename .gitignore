@@ -1,8 +1,28 @@
+# Secrets
 .env
+.env.*
+!.env.example
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
 .pytest_cache/
 .venv/
 venv/
 *.egg-info/
+dist/
+build/
+
+# Docker / local data
 postgres_data/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
