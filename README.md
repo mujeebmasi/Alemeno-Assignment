@@ -31,7 +31,7 @@ No separate Postgres, Redis, or Python install required.
 
 ```bash
 # 1. Clone the repository
-git clone <your-repo-url>
+git clone <https://github.com/mujeebmasi/Alemeno-Assignment>
 cd <repo-folder>
 
 # 2. (Recommended) Add Gemini API key
@@ -39,7 +39,10 @@ cp .env.example .env
 # Edit .env → set GEMINI_API_KEY=...
 
 # 3. Start everything
+MAKE SURE YOUR DOCKER DESKTOP IS RUNNING IN BACKGROUND
+docker compose down
 docker compose up --build -d
+docker compose ps
 ```
 
 **API:** http://localhost:8000  
