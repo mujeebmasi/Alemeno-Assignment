@@ -1,5 +1,184 @@
 # System Architecture
 
+> One sentence: the client uploads a CSV, the API creates a job and queues work, the worker cleans and enriches the data, PostgreSQL stores the results, and the client polls for completion.
+---
+
+## 1. High-Level View
+```mermaid
+flowchart LR
+    U[Client / Swagger / curl] --> API[FastAPI API]
+    API --> DB[(PostgreSQL)]
+    API --> Q[(Redis Queue)]
+    Q --> W[Celery Worker]
+    W --> C[Cleaning]
+    W --> A[Anomaly Detection]
+    W --> L[LLM Classification / Summary]
+    W --> DB
+
+    U -->|poll status/results| API
+    API --> DB
+```
+
+### Component roles
+| Component | Responsibility |
+|-----------|----------------|
+| API | Validates uploads, creates jobs, exposes status/results endpoints |
+| Redis | Buffers background tasks |
+| Worker | Runs the CSV processing pipeline |
+| PostgreSQL | Stores jobs, transactions, and summaries |
+| Gemini | Classifies missing categories and generates the narrative summary |
+---
+
+## 2. Deployment Topology
+The app runs as four Docker containers:
+
+- `api` on port `8000`
+- `worker` for Celery jobs
+- `db` for PostgreSQL
+- `redis` for the task queue
+Inside Docker, services talk to each other by container name, not `localhost`.
+
+---
+
+## 3. Request Lifecycle
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Client
+    participant A as API
+    participant DB as PostgreSQL
+    participant R as Redis
+    participant W as Worker
+    participant L as Gemini
+    U->>A: POST /jobs/upload (CSV)
+    A->>A: validate_csv()
+    A->>DB: insert Job(status=pending)
+    A->>R: enqueue process_transaction_job(job_id, file)
+    A-->>U: job_id returned immediately
+
+    R->>W: deliver task
+    W->>DB: update Job(status=processing)
+    W->>W: clean_transactions()
+    W->>W: detect_anomalies()
+    W->>L: classify_uncategorised()
+    W->>L: generate_narrative_summary()
+    W->>DB: save transactions and summary
+    W->>DB: update Job(status=completed)
+
+    U->>A: GET /jobs/{job_id}/status
+    A->>DB: read Job + summary
+    A-->>U: status payload
+
+    U->>A: GET /jobs/{job_id}/results
+    A->>DB: read transactions + summary
+    A-->>U: full report
+```
+### Processing order
+
+1. Validate the uploaded CSV.
+2. Create the job record in PostgreSQL.
+3. Queue the background task in Redis.
+4. Clean the data and normalize fields.
+5. Detect anomalies.
+6. Classify uncategorised rows with the LLM, with fallback if needed.
+7. Generate the summary and persist everything.
+
+---
+
+## 4. Worker Pipeline
+```mermaid
+flowchart TD
+    START([Task received]) --> S1[Clean CSV]
+    S1 --> S2[Detect anomalies]
+    S2 --> S3[LLM classification]
+    S3 --> S4[LLM summary]
+    S4 --> S5[Persist results]
+    S5 --> DONE([Job completed])
+```
+### What each step does
+
+- `cleaning.py`: validates columns, normalizes dates and amounts, uppercases status/currency, fills missing categories, removes duplicates.
+- `anomaly.py`: flags transactions above 3× account median and USD transactions for domestic merchants.
+- `llm.py`: batches uncategorised rows for classification and generates the final narrative summary, with retries and fallback rules.
+- `pipeline.py`: orchestrates the whole job and writes the final data back to the database.
+
+---
+
+## 5. Database Schema
+```mermaid
+erDiagram
+    JOBS ||--o{ TRANSACTIONS : contains
+    JOBS ||--o| JOB_SUMMARIES : has
+
+    JOBS {
+        int id PK
+        string filename
+    enum status
+    int row_count_raw
+    int row_count_clean
+    datetime created_at
+    datetime completed_at
+    text error_message
+    }
+
+    TRANSACTIONS {
+        int id PK
+    int job_id FK
+    string txn_id
+    string date
+    string merchant
+    float amount
+    string currency
+    string status
+    string category
+    string account_id
+    bool is_anomaly
+    text anomaly_reason
+    string llm_category
+        bool llm_failed
+    }
+
+    JOB_SUMMARIES {
+        int id PK
+    int job_id FK
+    float total_spend_inr
+    float total_spend_usd
+    json top_merchants
+    int anomaly_count
+    text narrative
+        string risk_level
+        json category_breakdown
+    }
+```
+
+### Job states
+
+`pending` → `processing` → `completed` or `failed`
+
+---
+
+## 6. Why the Design Works
+
+The API stays thin, the worker does all heavy processing, and PostgreSQL is the single source of truth. That keeps uploads fast, makes the processing pipeline reusable, and lets status/result endpoints read stored data without recomputing anything.
+
+The main trade-off is that the design is optimized for small to medium jobs and clear separation, not for massive concurrent throughput. The next scaling step would be object storage for uploads, bulk writes, more workers, and stronger queue/backpressure controls.
+
+---
+
+## 7. Submission Diagram Reference
+
+If you need a draw.io diagram, recreate this flow:
+
+```text
+[Client] -> [FastAPI API] -> [Redis] -> [Celery Worker] -> [PostgreSQL]
+                               |            |
+                               |            -> [Gemini API]
+                               -> status/results read from PostgreSQL
+```
+
+Keep the diagram focused on the upload path, background processing, and the status/results polling flow.
+# System Architecture
+
 > **One sentence:** You upload a CSV → API saves a Job and hands work to Redis → Worker cleans, detects anomalies, calls LLM, saves results → You poll and fetch results.
 
 ---
