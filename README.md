@@ -243,6 +243,40 @@ Job statuses: `pending` → `processing` → `completed` | `failed`
 
 ---
 
+## Codebase Review
+
+### Architecture overview
+
+The codebase is split into a thin API layer, a background worker, and reusable service modules. That keeps HTTP request handling separate from CSV processing, anomaly detection, and LLM logic. The main flow is:
+
+1. The API receives a CSV upload and validates the file.
+2. A `Job` row is created in PostgreSQL with status `pending`.
+3. The file content is sent to Celery through Redis.
+4. The worker cleans the data, detects anomalies, classifies missing categories, generates a summary, and persists results.
+5. The client polls `/status` and `/results` to retrieve the finished job.
+
+### Why this structure works
+
+- `app/api/jobs.py` stays focused on request/response handling.
+- `app/services/cleaning.py`, `app/services/anomaly.py`, and `app/services/llm.py` keep the business logic reusable and testable.
+- `app/services/pipeline.py` acts as the single orchestrator for the full job lifecycle.
+- `app/models.py` mirrors the product shape with one job, many transactions, and one summary.
+- `app/worker/tasks.py` keeps slow work off the API thread so uploads return immediately.
+
+### Request lifecycle
+
+`POST /jobs/upload` reads the file, validates the CSV columns, creates the database job record, and enqueues the Celery task. The Celery worker decodes the file, updates the job to `processing`, runs the cleaning and anomaly steps, calls the LLM for uncategorised rows and the narrative summary, then writes cleaned transactions and the job summary back to PostgreSQL. After that, the job is marked `completed`, and the API endpoints simply read the stored results.
+
+### Bottlenecks at scale
+
+If traffic jumped by 100x, the first pressure points would be memory usage from loading CSVs in the API and worker, the limited Celery concurrency, row-by-row database inserts, and LLM latency or provider failures. Redis would also become a backlog point if workers could not keep up.
+
+### Next iteration for enterprise scale
+
+For a production-grade version, I would move uploads to object storage, enqueue file references instead of raw content, split the pipeline into smaller idempotent stages, batch database writes, and put the LLM behind rate limiting and circuit breakers. The trade-off is more infrastructure and operational complexity, but the result is better throughput, easier retries, and stronger failure isolation.
+
+---
+
 ## Troubleshooting
 
 | Issue | Fix |
