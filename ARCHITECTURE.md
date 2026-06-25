@@ -165,7 +165,7 @@ The main trade-off is that the design is optimized for small to medium jobs and 
 
 ---
 
-## 7. Submission Diagram Reference
+
 
 If you need a draw.io diagram, recreate this flow:
 
@@ -289,42 +289,8 @@ http://localhost:8000
 
 ---
 
-## 9. LLM Integration
 
-```mermaid
-flowchart LR
-    subgraph Worker
-        B[Uncategorised rows]
-        S[Job statistics]
-    end
 
-    subgraph llm.py
-        R1[Retry up to 3x<br/>1s → 2s → 4s backoff]
-        FB[Fallback rules<br/>if all retries fail]
-    end
-
-    subgraph External
-        G[Gemini 1.5 Flash]
-    end
-
-    B -->|batch of 15| R1
-    R1 --> G
-    G -->|categories JSON| B
-    R1 -->|fail| FB
-    FB --> B
-
-    S --> R1
-    R1 --> G
-    G -->|summary JSON| S
-    R1 -->|fail| FB
-    FB --> S
-```
-
-**Config:** `GEMINI_API_KEY` in `.env` → read by `config.py` → used in `llm.py`
-
-Without key: fallback merchant-name rules + computed summary (job still completes).
-
----
 
 ## 10. Folder Structure (Visual Tree)
 
@@ -397,42 +363,7 @@ flowchart TD
 
 ---
 
-## 12. Explain This in 60 Seconds (Video Script)
 
-> "This is an async transaction processing pipeline. The client uploads a dirty CSV to FastAPI, which immediately creates a Job in PostgreSQL and pushes a Celery task to Redis — returning a job_id in under 100 milliseconds.
->
-> The worker picks up the task and runs five steps: clean the data, detect anomalies, batch-classify uncategorised rows with Gemini, generate a narrative summary, and persist everything to Postgres.
->
-> The client polls GET status until completed, then fetches GET results for the full report — cleaned transactions, flagged anomalies, category breakdown, and an LLM-generated risk summary.
->
-> Everything runs in Docker Compose — API, worker, Redis, and PostgreSQL — with one command and no manual setup."
-
----
-
-## 13. draw.io Diagram (for submission)
-
-Recreate this layout in [draw.io](https://app.diagrams.net):
-
-```
-[Laptop: Client] ──HTTP:8000──► [Box: FastAPI API]
-                                      │
-                         ┌────────────┼────────────┐
-                         ▼            ▼            ▼
-                    [PostgreSQL]  [Redis]    (returns job_id)
-                         ▲            │
-                         │            ▼
-                         └──── [Celery Worker] ──HTTPS──► [Gemini API]
-```
-
-**Labels to add:**
-- POST /jobs/upload on arrow Client → API
-- enqueue task on arrow API → Redis
-- process pipeline on arrow Redis → Worker
-- read/write on arrows Worker ↔ PostgreSQL
-
-Save as public draw.io link for your submission checklist.
-
----
 
 ## Quick Links
 
